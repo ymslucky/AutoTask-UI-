@@ -2,6 +2,7 @@ import sys
 import json
 import threading
 import time
+from collections import deque
 from copy import deepcopy
 from datetime import datetime, date, timedelta
 
@@ -50,6 +51,40 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+class StrongRandomSelector:
+    def __init__(self, cells, window_size=30):
+        """
+        初始化强随机选择器
+        :param cells: 原始 cell 列表
+        :param window_size: 滑动窗口大小，默认为 30
+        """
+        self.cells = list(cells)  # 原始数据副本
+        self.window_size = window_size
+        self.recent_cells = deque(maxlen=window_size)  # 滑动窗口队列
+
+    def select_next(self):
+        """
+        选择下一个强随机的 cell
+        :return: 选中的 cell
+        """
+        # 从原始数据中筛选出不在滑动窗口中的候选池
+        candidates = [cell for cell in self.cells if cell not in self.recent_cells]
+
+        # 边界处理：如果候选池为空，清空队列或允许重复
+        if not candidates:
+            print("[WARNING] 候选池为空，清空滑动窗口以继续选择")
+            self.recent_cells.clear()
+            candidates = self.cells  # 允许重复
+
+        # 从候选池中随机选择一个 cell
+        selected_cell = random.choice(candidates)
+
+        # 将选中的 cell 加入滑动窗口队列
+        self.recent_cells.append(selected_cell)
+
+        return selected_cell
+
 
 
 # 在 main_plus.py 中添加以下类
@@ -278,13 +313,7 @@ class AITestDialog(QDialog):
                     token_json_path="./config/token.json"
                 )
                 self.current_provider = "doubao"
-            else:
-                # 如果都没有配置，尝试使用默认的 Kimi
-                self.chat_bot = ChatBot(
-                    provider="kimi",
-                    token_json_path="./config/token.json"
-                )
-                self.current_provider = "kimi"
+
         except Exception as e:
             QMessageBox.warning(self, "初始化失败", f"ChatBot 初始化失败: {str(e)}")
 
@@ -1742,7 +1771,7 @@ font-weight:bold;""")
                     icon_label.setPixmap(pm)
                 else:
                     icon_label.setText("🖼️")
-                content_label.setText(f"{click_type}\n图片模式")
+                content_label.setText(f"{click_type} · 图片")
 
             elif use_coordinates:
                 x_coord = p.get("x_coordinate", 0)
@@ -1935,7 +1964,7 @@ font-weight:bold;""")
                         background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #e5e5e5,stop:0.5 #bdbdbd,stop:1 #9e9e9e);
                         border-radius:6px;padding:2px 6px;font-weight:bold;""")
                 icon_label.setText("✋")
-        elif t == "AI 自动回复":
+        elif t == "自动回复":
             provider = p.get("provider", "kimi")
             content_label.setText(f"{provider}")
             icon_label.setText("🤖")
@@ -2017,7 +2046,7 @@ font-weight:bold;""")
             "拖拽": "✋",
             "鼠标滚轮": "🖱️",  # 使用相同图标但可以区分
             "键盘热键": "⌨️",
-            "AI 自动回复": "🤖"
+            "自动回复": "🤖"
         }
 
         icon_text = icons.get(step_type, "❓")  # 默认问号图标
@@ -2079,7 +2108,7 @@ font-weight:bold;""")
     border-radius:6px;
     padding:2px 6px;
     font-weight:bold;""",
-                "AI 自动回复": """color:#ffffff;
+                "自动回复": """color:#ffffff;
             background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #a6c0fe,stop:1 #f68084);
             border-radius:6px;
             padding:2px 6px;
@@ -2589,7 +2618,7 @@ class TaskRunner(QObject):
                         self.execute_mouse_scroll(params)
                     elif step_type == "键盘热键":
                         self.execute_hotkey(params)
-                    elif step_type == "AI 自动回复":
+                    elif step_type == "自动回复":
                         self.execute_ai_reply(params)
                     else:
                         self.log_message.emit(self.task_name, f"⚠️ 未知步骤类型: {step_type}")
@@ -2711,11 +2740,10 @@ class TaskRunner(QObject):
     def execute_ai_reply(self, params):
         try:
             # 获取剪贴板内容作为消息
-            clipboard_content = pyperclip.paste()
-            if not clipboard_content:
-                self.log_message.emit(self.task_name, "⚠️ 剪贴板为空，无法进行 AI 回复")
-                return
-
+            if params.get("use_clipboard", False):
+                clipboard_content = pyperclip.paste()
+            else:
+                clipboard_content = '用户未输入消息 根据系统提示词输出'
             # 获取参数
             provider = params.get("provider", "kimi")
             system_prompt = params.get("system_prompt", "")
@@ -2891,7 +2919,8 @@ class TaskRunner(QObject):
                     text = next(self._excel_cycle_dict[cache_key])
 
                 else:  # 随机
-                    text = random.choice(cells)
+
+                    text = StrongRandomSelector(cells).select_next()
         self._send_text(str(text))
 
     def _send_text(self, text: str):
@@ -3009,7 +3038,7 @@ class StepConfigDialog(QDialog):
         type_layout = QHBoxLayout()
         type_layout.addWidget(QLabel("步骤类型:"))
         self.type_combo = QComboBox()
-        self.type_combo.addItems(["鼠标点击", "文本输入", "等待", "截图", "拖拽", "鼠标滚轮", "键盘热键", "AI 自动回复"])
+        self.type_combo.addItems(["鼠标点击", "文本输入", "等待", "截图", "拖拽", "鼠标滚轮", "键盘热键", "自动回复"])
         type_layout.addWidget(self.type_combo)
         layout.addLayout(type_layout)
 
@@ -3224,7 +3253,7 @@ class StepConfigDialog(QDialog):
 
     def capture_region(self):
         parent = self.parent()
-        # 将原来的隐藏方法改为最小化
+
         parent.hide()
         self.hide()
 
@@ -3234,11 +3263,10 @@ class StepConfigDialog(QDialog):
 
     def on_region_done(self, geo: QRect):
 
-        # 先关闭覆盖层窗口（关键修复！）
         if hasattr(self, 'overlay') and self.overlay is not None:
-            self.overlay.close()  # 或者 self.overlay.hide()
-            self.overlay.deleteLater()  # 可选，帮助 Qt 彻底清理
-            self.overlay = None  # 可选，避免野指针
+            self.overlay.close()
+            self.overlay.deleteLater()
+            self.overlay = None
 
         parent = self.parent()
         if geo.isNull():
@@ -3507,6 +3535,12 @@ class StepConfigDialog(QDialog):
         self.use_history_checkbox = QCheckBox("使用对话历史")
         self.use_history_checkbox.setChecked(True)
         history_layout.addWidget(self.use_history_checkbox)
+
+        # 添加剪切板输入选项
+        self.use_clipboard_checkbox = QCheckBox("使用剪切板作为消息输入")
+        self.use_clipboard_checkbox.setChecked(False)  # 默认不启用
+        history_layout.addWidget(self.use_clipboard_checkbox)
+
         layout.addLayout(history_layout)
 
         # 流式输出选项
@@ -3528,7 +3562,7 @@ class StepConfigDialog(QDialog):
                 prompt = self.role_prompts[role_text]
                 self.ai_system_prompt_edit.setPlainText(prompt)
                 # 如果是自定义角色，允许用户编辑
-                self.ai_system_prompt_edit.setReadOnly(role_text != "自定义")
+                # self.ai_system_prompt_edit.setReadOnly(role_text != "自定义")
         except RuntimeError as e:
             # 控件已被删除，忽略错误
             print(e)
@@ -3939,7 +3973,7 @@ class StepConfigDialog(QDialog):
             self.scroll_panel.show()
         elif step_type == "键盘热键":
             self.hot_keyboard_panel.show()
-        elif step_type == "AI 自动回复":  # 新增
+        elif step_type == "自动回复":  # 新增
             self.ai_reply_panel.setVisible(True)
             # 隐藏其他面板
 
@@ -4013,10 +4047,11 @@ class StepConfigDialog(QDialog):
             self.hotkey_input.setText(hotkey)
             self._hotkey_value = hotkey
             self.hotkey_delay_spin.setValue(params.get("delay_ms", 100))
-        elif step_type == "AI 自动回复":
+        elif step_type == "自动回复":
             self.ai_provider_combo.setCurrentText(params.get("provider", "kimi"))
             self.ai_system_prompt_edit.setPlainText(params.get("system_prompt", ""))
             self.use_history_checkbox.setChecked(params.get("use_history", True))
+            self.use_clipboard_checkbox.setChecked(params.get("use_clipboard", True))
             self.stream_checkbox.setChecked(params.get("stream", False))
             # 设置角色下拉框，如果提示词匹配预设角色
             current_prompt = params.get("system_prompt", "")
@@ -4105,11 +4140,12 @@ class StepConfigDialog(QDialog):
                 "hotkey": self._hotkey_value,  # 使用存储的热键值
                 "delay_ms": self.hotkey_delay_spin.value()
             }
-        elif step_type == "AI 自动回复":
+        elif step_type == "自动回复":
             params = {
                 "provider": self.ai_provider_combo.currentText(),
                 "system_prompt": self.ai_system_prompt_edit.toPlainText(),
                 "use_history": self.use_history_checkbox.isChecked(),
+                "use_clipboard": self.use_clipboard_checkbox.isChecked(),
                 "stream": self.stream_checkbox.isChecked()
             }
         params["step_time"] = datetime.now().strftime("%H:%M:%S")
@@ -4515,7 +4551,8 @@ class AutomationUI(QMainWindow):
 
         # 步骤表格 - 设置列宽可拖拽
         self.steps_table = QTableWidget(0, 4)
-        self.steps_table.setHorizontalHeaderLabels(["类型", "描述", "参数", "延时(秒)"])
+        self.steps_table.setHorizontalHeaderLabels(["类型", "描述", "参数"])
+        self.steps_table.setColumnCount(3)  # 设置列数为3
         self.steps_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)  # 可拖拽调整列宽
         self.steps_table.horizontalHeader().setStretchLastSection(True)
         self.steps_table.verticalHeader().setVisible(False)
@@ -5594,9 +5631,22 @@ class AutomationUI(QMainWindow):
                 end_x = step['params'].get('end_x', 0)
                 end_y = step['params'].get('end_y', 0)
                 params_text = f"从({start_x},{start_y})到({end_x},{end_y})"
+        elif step["type"] == "自动回复":
+            provider = step['params'].get("provider", "kimi")
+            system_prompt = step['params'].get("system_prompt", "")
+            use_history = step['params'].get("use_history", True)
+            stream = step['params'].get("stream", False)
+
+            # 构造参数描述文本
+            params_text = (
+                f"AI 提供商: {provider}, "
+                f"系统提示词: {'已设置' if system_prompt else '未设置'}, "
+                f"使用历史记录: {'是' if use_history else '否'}, "
+                f"流式输出: {'是' if stream else '否'}"
+            )
 
         self.steps_table.setItem(row, 2, QTableWidgetItem(params_text))
-        self.steps_table.setItem(row, 3, QTableWidgetItem(str(step.get("delay", 0))))
+        # self.steps_table.setItem(row, 3, QTableWidgetItem(str(step.get("delay", 0))))
         self.steps_table.resizeColumnToContents(1)  # 列宽按内容自适应
 
     def start_current_task(self):
@@ -6363,6 +6413,16 @@ class AutomationUI(QMainWindow):
         event.accept()
 
     def add_step(self):
+        # 检查是否有任务
+        if self.task_list.count() == 0:
+            QMessageBox.information(self, "提示", "请先新建任务，再添加步骤！")
+            return
+        
+        # 检查是否有当前选中的任务
+        if not self.current_task or self.current_task not in self.tasks:
+            QMessageBox.information(self, "提示", "请先选中一个任务，再添加步骤！")
+            return
+            
         dialog = StepConfigDialog(parent=self)
         if dialog.exec() == QDialog.Accepted:
             step_data = dialog.get_step_data()
@@ -6474,11 +6534,21 @@ class AutomationUI(QMainWindow):
                     end_x = new_step_data['params'].get('end_x', 0)
                     end_y = new_step_data['params'].get('end_y', 0)
                     params_text = f"从({start_x},{start_y})到({end_x},{end_y})"
-            elif new_step_data["type"] == "AI 自动回复":
-                params_text = f"AI: {new_step_data['params'].get('ai_name', '')}"
+            elif new_step_data["type"] == "自动回复":
+                    provider = new_step_data['params'].get("provider", "kimi")
+                    system_prompt = new_step_data['params'].get("system_prompt", "")
+                    use_history = new_step_data['params'].get("use_history", True)
+                    stream = new_step_data['params'].get("stream", False)
 
+                    # 构造参数描述文本
+                    params_text = (
+                        f"AI 提供商: {provider}, "
+                        f"系统提示词: {'已设置' if system_prompt else '未设置'}, "
+                        f"使用历史记录: {'是' if use_history else '否'}, "
+                        f"流式输出: {'是' if stream else '否'}"
+                    )
             self.steps_table.setItem(selected_row, 2, QTableWidgetItem(params_text))
-            self.steps_table.setItem(selected_row, 3, QTableWidgetItem(str(new_step_data.get("delay", 0))))
+            # self.steps_table.setItem(selected_row, 3, QTableWidgetItem(str(new_step_data.get("delay", 0))))
 
             self.tasks[self.current_task]["steps"][selected_row] = new_step_data
 
